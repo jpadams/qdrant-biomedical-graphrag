@@ -40,7 +40,7 @@ class Neo4jGraphQuery:
         Biomedical Graph Schema:
 
         Nodes:
-        - Paper: {pmid, title, abstract, publication_date, doi}
+        - Paper: {pmid, title, abstract, publication_date, doi, qdrant_point_id, qdrant_collection}
         - Author: {name}
         - Institution: {name}
         - MeshTerm: {ui, term}

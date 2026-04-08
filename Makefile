@@ -35,6 +35,15 @@ enrich-pubmed-dataset: ## Enrich PubMed dataset with related papers
 	@echo "Paper enrichment complete."
 
 #################################################################################
+## Unified Ingestion Commands
+#################################################################################
+
+ingest-all: ## Run unified ingestion: Qdrant embeddings + Neo4j graph (lock-step)
+	@echo "Running unified ingestion (Qdrant + Neo4j)..."
+	uv run src/biomedical_graphrag/infrastructure/unified_ingestion.py
+	@echo "Unified ingestion complete."
+
+#################################################################################
 ## Neo4j Graph Commands
 #################################################################################
 

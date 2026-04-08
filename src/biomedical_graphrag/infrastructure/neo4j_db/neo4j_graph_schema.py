@@ -41,7 +41,12 @@ class Neo4jGraphIngestion:
     # =====================================================
     # ================= PAPER INGESTION ===================
     # =====================================================
-    async def ingest_paper_dataset(self, dataset: PaperDataset) -> None:
+    async def ingest_paper_dataset(
+        self,
+        dataset: PaperDataset,
+        qdrant_point_ids: dict[str, int] | None = None,
+        qdrant_collection: str | None = None,
+    ) -> None:
         """Ingest papers, authors, MeSH, and citations."""
         await self.create_constraints()
 
@@ -50,7 +55,7 @@ class Neo4jGraphIngestion:
         # --- Batch paper nodes ---
         for i in range(0, len(dataset.papers), self.batch_size):
             batch = dataset.papers[i : i + self.batch_size]
-            await self._create_paper_batch(batch)
+            await self._create_paper_batch(batch, qdrant_point_ids, qdrant_collection)
             logger.info(f"  → Inserted {i + len(batch)} / {len(dataset.papers)} papers")
 
         # --- Authors, institutions, MeSH (async concurrent) ---
@@ -85,7 +90,12 @@ class Neo4jGraphIngestion:
             except Exception as e:
                 logger.warning(f"⚠️ Failed to ingest relationships for paper {paper.pmid}: {e}")
 
-    async def _create_paper_batch(self, papers: list[Paper]) -> None:
+    async def _create_paper_batch(
+        self,
+        papers: list[Paper],
+        qdrant_point_ids: dict[str, int] | None = None,
+        qdrant_collection: str | None = None,
+    ) -> None:
         """Insert papers in batches using UNWIND for speed."""
         query = """
         UNWIND $batch AS row
@@ -93,7 +103,9 @@ class Neo4jGraphIngestion:
         SET p.title = row.title,
             p.abstract = row.abstract,
             p.publication_date = row.publication_date,
-            p.doi = row.doi
+            p.doi = row.doi,
+            p.qdrant_point_id = row.qdrant_point_id,
+            p.qdrant_collection = row.qdrant_collection
         """
         params = {
             "batch": [
@@ -103,6 +115,8 @@ class Neo4jGraphIngestion:
                     "abstract": p.abstract,
                     "publication_date": p.publication_date,
                     "doi": p.doi,
+                    "qdrant_point_id": qdrant_point_ids.get(p.pmid) if qdrant_point_ids else None,
+                    "qdrant_collection": qdrant_collection,
                 }
                 for p in papers
             ]
@@ -195,6 +209,28 @@ class Neo4jGraphIngestion:
         MERGE (g)-[:MENTIONED_IN]->(p)
         """
         await self.client.create_graph(query, {"gene_id": gene_id, "pmid": pmid})
+
+    # =====================================================
+    # ============= QDRANT CROSS-REFERENCE ===============
+    # =====================================================
+    async def update_qdrant_references(
+        self, pmid_to_point_id: dict[str, int], collection_name: str
+    ) -> None:
+        """Stamp qdrant_point_id and qdrant_collection onto existing Paper nodes."""
+        batch_list = [
+            {"pmid": pmid, "point_id": pid, "collection": collection_name}
+            for pmid, pid in pmid_to_point_id.items()
+        ]
+        for i in range(0, len(batch_list), self.batch_size):
+            chunk = batch_list[i : i + self.batch_size]
+            query = """
+            UNWIND $batch AS row
+            MATCH (p:Paper {pmid: row.pmid})
+            SET p.qdrant_point_id = row.point_id,
+                p.qdrant_collection = row.collection
+            """
+            await self.client.create_graph(query, {"batch": chunk})
+        logger.info(f"✅ Stamped Qdrant references on {len(batch_list)} papers.")
 
     # =====================================================
     # ============== RELATIONSHIP HELPERS =================
