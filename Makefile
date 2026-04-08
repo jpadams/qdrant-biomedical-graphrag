@@ -38,9 +38,19 @@ enrich-pubmed-dataset: ## Enrich PubMed dataset with related papers
 ## Unified Ingestion Commands
 #################################################################################
 
-ingest-all: ## Run unified ingestion: Qdrant embeddings + Neo4j graph (lock-step)
+ingest-all: ## Run unified ingestion: Qdrant + Neo4j (no extraction, or set EXTRACTION__MODE in .env)
 	@echo "Running unified ingestion (Qdrant + Neo4j)..."
 	uv run src/biomedical_graphrag/infrastructure/unified_ingestion.py
+	@echo "Unified ingestion complete."
+
+ingest-all-minimal: ## Unified ingestion with OpenAI entity extraction
+	@echo "Running unified ingestion with minimal extraction..."
+	uv run src/biomedical_graphrag/infrastructure/unified_ingestion.py --extraction-mode minimal
+	@echo "Unified ingestion complete."
+
+ingest-all-maximal: ## Unified ingestion with full NLP extraction pipeline (scispaCy+GLiNER+LLM)
+	@echo "Running unified ingestion with maximal extraction..."
+	uv run src/biomedical_graphrag/infrastructure/unified_ingestion.py --extraction-mode maximal
 	@echo "Unified ingestion complete."
 
 #################################################################################

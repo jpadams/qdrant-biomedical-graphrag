@@ -55,6 +55,22 @@ class PubMedSettings(BaseModel):
     api_key: SecretStr = Field(default=SecretStr(""), description="API key for PubMed API")
 
 
+class ExtractionSettings(BaseModel):
+    mode: str = Field(
+        default="none",
+        description="Extraction mode: none, minimal (OpenAI-only), maximal (scispaCy+GLiNER+LLM)",
+    )
+    confidence_threshold: float = Field(
+        default=0.3, description="Minimum confidence for extracted entities"
+    )
+    llm_model: str = Field(
+        default="gpt-4o-mini", description="LLM model for entity extraction"
+    )
+    batch_concurrency: int = Field(
+        default=10, description="Max concurrent extraction tasks"
+    )
+
+
 class JsonDataSettings(BaseModel):
     pubmed_json_path: str = Field(
         default="data/pubmed_dataset.json", description="Path to the PubMed JSON dataset"
@@ -83,6 +99,7 @@ class Settings(BaseSettings):
     neo4j: Neo4jSettings = Neo4jSettings()
     qdrant: QdrantSettings = QdrantSettings()
     pubmed: PubMedSettings = PubMedSettings()
+    extraction: ExtractionSettings = ExtractionSettings()
     json_data: JsonDataSettings = JsonDataSettings()
 
     @model_validator(mode="after")

@@ -21,6 +21,13 @@ dependencies = [
     "uvicorn>=0.34.0",
 ]
 
+[project.optional-dependencies]
+extraction-full = [
+    "scispacy>=0.5.0",
+    "gliner>=0.2.0",
+    "glirel>=0.1.0",
+]
+
 # [[tool.uv.index]]
 # name = "pytorch-cpu"
 # url = "https://download.pytorch.org/whl/cpu"

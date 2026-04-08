@@ -32,6 +32,8 @@
     - [Infrastructure Setup](#infrastructure-setup)
       - [Neo4j Graph Database](#neo4j-graph-database)
       - [Qdrant Vector Search Engine](#qdrant-vector-search-engine)
+      - [Unified Ingestion (Lock-Step)](#unified-ingestion-lock-step)
+      - [Entity Extraction from Abstracts](#entity-extraction-from-abstracts)
     - [Query Commands](#query-commands)
       - [Hybrid Neo4j + Qdrant Queries](#hybrid-neo4j--qdrant-queries)
       - [Sample Queries](#sample-queries)
@@ -59,6 +61,8 @@ A biomedical context engineering system. An agent uses Qdrant vector search engi
 - **Neo4j Graph Database**: Graph enrichment via ontology-based tools (collaborator networks, MeSH relations, gene co-mentions)
 - **Data Integration**: Processes PubMed papers, gene data, and research citations
 - **Biomedical Schema**: Specialized graph schema for papers, authors, institutions, genes, and MeSH terms
+- **Entity Extraction**: Multi-stage NLP pipeline (scispaCy, GLiNER-BioMed, LLM) extracts genes, proteins, diseases, drugs, techniques, and more from abstracts
+- **Unified Ingestion**: Lock-step Qdrant + Neo4j ingestion with cross-reference IDs and optional entity extraction
 - **Async Processing**: High-performance async data collection and processing
 
 ## Project Structure
@@ -77,6 +81,7 @@ biomedical-graphrag/
 │       ├── config.py           # Configuration management
 │       ├── data_sources/       # Data collection modules
 │       ├── domain/             # Domain models and entities
+│       ├── extraction/         # Biomedical entity & relationship extraction
 │       ├── infrastructure/     # Database and external service adapters
 │       └── utils/              # Utility functions
 ├── static/                     # Static assets (images, etc.)
@@ -233,6 +238,60 @@ Notes:
 - The collection is configured by default with **scalar quantization** (compressed dense vectors).
 - `QDRANT__CLOUD_INFERENCE=true` enables **Qdrant Cloud Inference** when embeddings are computed by Qdrant Cloud.
 - `QDRANT__ESTIMATE_BM25_AVG_LEN_ON_X_DOCS` controls how many documents are sampled to estimate the average abstract length used by **BM25**. This helps calibrate BM25-based scoring when using dense+BM25 hybrid retrieval.
+
+#### Unified Ingestion (Lock-Step)
+
+Instead of running Neo4j and Qdrant ingestion separately, you can run them together in lock-step. This ensures both systems stay in sync and adds `qdrant_point_id` / `qdrant_collection` cross-reference properties on Neo4j Paper nodes.
+
+```bash
+# Unified ingestion (Qdrant + Neo4j, no entity extraction)
+make ingest-all
+```
+
+#### Entity Extraction from Abstracts
+
+The system can extract fine-grained biomedical entities and relationships from paper abstracts beyond what MeSH terms provide. MeSH captures high-level subject headings, but misses specific genes/proteins, techniques, biological processes, and detailed disease mentions.
+
+Extracted entity types: `Gene`, `Protein`, `Disease`, `Drug`, `CellType`, `Organism`, `Technique`, `BiologicalProcess`, `AnatomicalStructure`
+
+Extracted relationship types: `TARGETS`, `ASSOCIATED_WITH`, `TREATS`, `EXPRESSED_IN`, `INHIBITS`, `ACTIVATES`, `DERIVED_FROM`, `INTERACTS_WITH`
+
+Two extraction modes are available:
+
+**Minimal mode** (OpenAI-only, no extra dependencies):
+
+```bash
+make ingest-all-minimal
+```
+
+Uses OpenAI structured output (gpt-4o-mini by default) to extract entities and relationships in a single API call per abstract. Cost: ~$0.50 per 10k abstracts.
+
+**Maximal mode** (scispaCy + GLiNER-BioMed + LLM fallback):
+
+```bash
+# Install optional extraction dependencies first
+uv pip install ".[extraction-full]"
+
+# scispaCy models (diseases/chemicals + proteins/genes/organisms)
+pip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_ner_bc5cdr_md-0.5.4.tar.gz
+pip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_ner_craft_md-0.5.4.tar.gz
+
+make ingest-all-maximal
+```
+
+Runs a multi-stage pipeline: scispaCy (fast baseline) -> GLiNER-BioMed (zero-shot NER) -> LLM (fallback). Results are merged using a confidence-based strategy. If any stage is unavailable (missing dependency), it falls back gracefully.
+
+**Configuration** (`.env`):
+
+```bash
+# Extraction settings
+EXTRACTION__MODE=none            # none, minimal, or maximal
+EXTRACTION__CONFIDENCE_THRESHOLD=0.3
+EXTRACTION__LLM_MODEL=gpt-4o-mini
+EXTRACTION__BATCH_CONCURRENCY=10
+```
+
+Extracted entities are stored as `ExtractedEntity` nodes in Neo4j, linked to papers via `MENTIONED_IN_ABSTRACT` relationships. Inter-entity relationships (e.g., gene TARGETS disease) are stored as `RELATED_TO` edges with a `relation_type` property.
 
 ### Query Commands
 

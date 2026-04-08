@@ -46,6 +46,9 @@ class Neo4jGraphQuery:
         - MeshTerm: {ui, term}
         - Journal: {name}
         - Gene: {gene_id, name, description, chromosome, map_location, organism, aliases, designations}
+        - ExtractedEntity: {normalized_name, name, type, confidence, extractor}
+          Types: Gene, Protein, Disease, Drug, CellType, Organism,
+          Technique, BiologicalProcess, AnatomicalStructure
 
         Relationships:
         - (Author)-[:WROTE]->(Paper)
@@ -54,6 +57,10 @@ class Neo4jGraphQuery:
         - (Paper)-[:PUBLISHED_IN]->(Journal)
         - (Paper)-[:CITES]->(Paper)
         - (Gene)-[:MENTIONED_IN]->(Paper)
+        - (Paper)-[:MENTIONED_IN_ABSTRACT]->(ExtractedEntity)
+        - (ExtractedEntity)-[:RELATED_TO {relation_type, confidence}]->(ExtractedEntity)
+          relation_type: TARGETS, ASSOCIATED_WITH, TREATS, EXPRESSED_IN,
+          INHIBITS, ACTIVATES, DERIVED_FROM, INTERACTS_WITH
         """
 
     def get_collaborators_with_topics(

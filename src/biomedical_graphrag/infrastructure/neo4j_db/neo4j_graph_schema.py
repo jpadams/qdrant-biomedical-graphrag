@@ -1,12 +1,17 @@
 """High-performance async Neo4j graph ingestion for biomedical papers and genes."""
 
+from __future__ import annotations
+
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from biomedical_graphrag.domain.dataset import GeneDataset, PaperDataset
 from biomedical_graphrag.domain.paper import Paper
 from biomedical_graphrag.infrastructure.neo4j_db.neo4j_client import AsyncNeo4jClient
 from biomedical_graphrag.utils.logger_util import setup_logging
+
+if TYPE_CHECKING:
+    from biomedical_graphrag.extraction.base import ExtractionResult
 
 logger = setup_logging()
 
@@ -33,6 +38,10 @@ class Neo4jGraphIngestion:
             "CREATE CONSTRAINT IF NOT EXISTS FOR (m:MeshTerm) REQUIRE m.ui IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (j:Journal) REQUIRE j.name IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (g:Gene) REQUIRE g.gene_id IS UNIQUE",
+            (
+                "CREATE CONSTRAINT IF NOT EXISTS FOR (e:ExtractedEntity) "
+                "REQUIRE (e.normalized_name, e.type) IS UNIQUE"
+            ),
         ]
         for c in constraints:
             await self.client.create_graph(c)
@@ -231,6 +240,96 @@ class Neo4jGraphIngestion:
             """
             await self.client.create_graph(query, {"batch": chunk})
         logger.info(f"✅ Stamped Qdrant references on {len(batch_list)} papers.")
+
+    # =====================================================
+    # =========== EXTRACTED ENTITY INGESTION ==============
+    # =====================================================
+    async def ingest_extracted_entities(
+        self, extraction_results: dict[str, ExtractionResult]
+    ) -> None:
+        """Create extracted entity nodes and link them to papers.
+
+        Args:
+            extraction_results: Mapping of PMID -> ExtractionResult.
+        """
+        await self.create_constraints()
+
+        # Collect all unique entities across papers
+        unique_entities: dict[tuple[str, str], dict[str, Any]] = {}
+        paper_entity_links: list[dict[str, str]] = []
+        all_relations: list[dict[str, Any]] = []
+
+        for pmid, result in extraction_results.items():
+            for entity in result.entities:
+                key = entity.dedup_key
+                # Keep highest confidence version
+                if key not in unique_entities or entity.confidence > unique_entities[key]["confidence"]:
+                    unique_entities[key] = {
+                        "normalized_name": entity.normalized_name,
+                        "name": entity.name,
+                        "type": entity.type,
+                        "confidence": entity.confidence,
+                        "extractor": entity.extractor,
+                    }
+                paper_entity_links.append({
+                    "pmid": pmid,
+                    "normalized_name": entity.normalized_name,
+                    "entity_type": entity.type,
+                })
+
+            for rel in result.relations:
+                all_relations.append({
+                    "pmid": pmid,
+                    "source_name": rel.source.strip().lower(),
+                    "target_name": rel.target.strip().lower(),
+                    "relation_type": rel.relation_type,
+                    "confidence": rel.confidence,
+                    "extractor": rel.extractor,
+                })
+
+        # Batch create entity nodes
+        entity_batch = list(unique_entities.values())
+        for i in range(0, len(entity_batch), self.batch_size):
+            chunk = entity_batch[i : i + self.batch_size]
+            query = """
+            UNWIND $batch AS row
+            MERGE (e:ExtractedEntity {normalized_name: row.normalized_name, type: row.type})
+            SET e.name = row.name,
+                e.confidence = row.confidence,
+                e.extractor = row.extractor
+            """
+            await self.client.create_graph(query, {"batch": chunk})
+
+        logger.info(f"✅ Created {len(entity_batch)} unique extracted entity nodes.")
+
+        # Batch create Paper -> ExtractedEntity relationships
+        for i in range(0, len(paper_entity_links), self.batch_size):
+            chunk = paper_entity_links[i : i + self.batch_size]
+            query = """
+            UNWIND $batch AS row
+            MATCH (p:Paper {pmid: row.pmid})
+            MATCH (e:ExtractedEntity {normalized_name: row.normalized_name, type: row.entity_type})
+            MERGE (p)-[:MENTIONED_IN_ABSTRACT]->(e)
+            """
+            await self.client.create_graph(query, {"batch": chunk})
+
+        logger.info(f"✅ Created {len(paper_entity_links)} paper-entity links.")
+
+        # Batch create inter-entity relationships
+        for i in range(0, len(all_relations), self.batch_size):
+            chunk = all_relations[i : i + self.batch_size]
+            query = """
+            UNWIND $batch AS row
+            MATCH (s:ExtractedEntity {normalized_name: row.source_name})
+            MATCH (t:ExtractedEntity {normalized_name: row.target_name})
+            MERGE (s)-[r:RELATED_TO {relation_type: row.relation_type}]->(t)
+            SET r.confidence = row.confidence,
+                r.extractor = row.extractor
+            """
+            await self.client.create_graph(query, {"batch": chunk})
+
+        if all_relations:
+            logger.info(f"✅ Created {len(all_relations)} inter-entity relationships.")
 
     # =====================================================
     # ============== RELATIONSHIP HELPERS =================
