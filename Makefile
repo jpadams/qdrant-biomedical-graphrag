@@ -58,6 +58,11 @@ ingest-all-maximal: ## Unified ingestion with full NLP extraction pipeline (HF+G
 	uv run src/biomedical_graphrag/infrastructure/unified_ingestion.py --extraction-mode maximal
 	@echo "Unified ingestion complete."
 
+link-mesh: ## Link MeSH entry terms (synonyms) to extracted entities in Neo4j
+	@echo "Parsing MeSH XML and linking to extracted entities..."
+	uv run src/biomedical_graphrag/infrastructure/mesh_loader.py
+	@echo "MeSH linking complete."
+
 #################################################################################
 ## Neo4j Graph Commands
 #################################################################################

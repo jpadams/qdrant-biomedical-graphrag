@@ -210,3 +210,4 @@ NEO4J_README.md
 
 # Extraction cache (large, regenerable)
 data/.extraction_cache/
+data/desc2026.gz

@@ -60,6 +60,7 @@ class Neo4jGraphQuery:
         - (Paper)-[:CITES]->(Paper)
         - (Gene)-[:MENTIONED_IN]->(Paper)  — curated NCBI genes AND extracted genes
         - (Paper)-[:MENTIONED_IN_ABSTRACT]->(ExtractedEntity)  — NER-extracted entities
+        - (MeshTerm)-[:SYNONYM_OF]->(ExtractedEntity)  — MeSH entry terms matched to extracted entities
         """
 
     def get_collaborators_with_topics(
