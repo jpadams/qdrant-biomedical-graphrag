@@ -133,6 +133,8 @@ class Neo4jGraphQuery:
 
         Returns entities grouped by type with the papers they appear in.
         Scoped to the retrieved papers — grounds insights in actual abstracts.
+        Filters out low-quality entities (low confidence, generic descriptions,
+        HTML artifacts).
 
         Args:
             pmids: List of PMIDs to query.
@@ -144,7 +146,14 @@ class Neo4jGraphQuery:
         cypher = f"""
             UNWIND $pmids AS pmid
             MATCH (p:Paper {{pmid: pmid}})-[:MENTIONED_IN_ABSTRACT]->(e:ExtractedEntity)
-            WHERE e.confidence >= 0.5
+            WHERE e.confidence >= 0.75
+              AND size(e.name) <= 60
+              AND NOT e.name CONTAINS '<'
+              AND NOT toLower(e.name) ENDS WITH ' genes'
+              AND NOT toLower(e.name) ENDS WITH ' proteins'
+              AND NOT toLower(e.name) ENDS WITH ' cells'
+              AND NOT toLower(e.name) ENDS WITH ' pathways'
+              AND NOT toLower(e.name) ENDS WITH ' mechanisms'
               {type_clause}
             WITH e.name AS entity, e.type AS type,
                  COLLECT(DISTINCT p.pmid) AS found_in_pmids,
@@ -185,6 +194,14 @@ class Neo4jGraphQuery:
                       WHERE toLower(e1.name) = toLower(term)
                          OR toLower(e1.name) CONTAINS toLower(term))
               AND e1 <> e2
+              AND e2.confidence >= 0.75
+              AND size(e2.name) <= 60
+              AND NOT e2.name CONTAINS '<'
+              AND NOT toLower(e2.name) ENDS WITH ' genes'
+              AND NOT toLower(e2.name) ENDS WITH ' proteins'
+              AND NOT toLower(e2.name) ENDS WITH ' cells'
+              AND NOT toLower(e2.name) ENDS WITH ' pathways'
+              AND NOT toLower(e2.name) ENDS WITH ' mechanisms'
               {type_clause}
             RETURN e2.name AS entity, e2.type AS type,
                    COUNT(DISTINCT p) AS shared_papers,
