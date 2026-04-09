@@ -46,9 +46,11 @@ class Neo4jGraphQuery:
         - MeshTerm: {ui, term}
         - Journal: {name}
         - Gene: {gene_id, name, description, chromosome, map_location, organism, aliases, designations}
+          Note: includes both curated NCBI genes AND high-confidence extracted genes
         - ExtractedEntity: {normalized_name, name, type, confidence, extractor}
-          Types: Gene, Protein, Disease, Drug, CellType, Organism,
-          Technique, BiologicalProcess, AnatomicalStructure
+          Each ExtractedEntity also carries its type as a secondary label:
+          :Gene, :Protein, :Disease, :Drug, :CellType, :Organism,
+          :Technique, :BiologicalProcess, :AnatomicalStructure
 
         Relationships:
         - (Author)-[:WROTE]->(Paper)
@@ -56,11 +58,8 @@ class Neo4jGraphQuery:
         - (Paper)-[:HAS_MESH_TERM {major_topic: boolean, qualifiers: [string]}]->(MeshTerm)
         - (Paper)-[:PUBLISHED_IN]->(Journal)
         - (Paper)-[:CITES]->(Paper)
-        - (Gene)-[:MENTIONED_IN]->(Paper)
-        - (Paper)-[:MENTIONED_IN_ABSTRACT]->(ExtractedEntity)
-        - (ExtractedEntity)-[:RELATED_TO {relation_type, confidence}]->(ExtractedEntity)
-          relation_type: TARGETS, ASSOCIATED_WITH, TREATS, EXPRESSED_IN,
-          INHIBITS, ACTIVATES, DERIVED_FROM, INTERACTS_WITH
+        - (Gene)-[:MENTIONED_IN]->(Paper)  — curated NCBI genes AND extracted genes
+        - (Paper)-[:MENTIONED_IN_ABSTRACT]->(ExtractedEntity)  — NER-extracted entities
         """
 
     def get_collaborators_with_topics(
@@ -126,6 +125,78 @@ class Neo4jGraphQuery:
             LIMIT 10
         """
         return self.query(cypher, {"pmid": pmid, "exclude_pmids": exclude_pmids})
+
+    def get_entities_for_papers(
+        self, pmids: list[str], entity_type_filter: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get all extracted entities from specific papers.
+
+        Returns entities grouped by type with the papers they appear in.
+        Scoped to the retrieved papers — grounds insights in actual abstracts.
+
+        Args:
+            pmids: List of PMIDs to query.
+            entity_type_filter: Optional type filter (e.g., 'Gene', 'Drug').
+        """
+        type_clause = (
+            "AND e.type = $type_filter" if entity_type_filter else ""
+        )
+        cypher = f"""
+            UNWIND $pmids AS pmid
+            MATCH (p:Paper {{pmid: pmid}})-[:MENTIONED_IN_ABSTRACT]->(e:ExtractedEntity)
+            WHERE e.confidence >= 0.5
+              {type_clause}
+            WITH e.name AS entity, e.type AS type,
+                 COLLECT(DISTINCT p.pmid) AS found_in_pmids,
+                 MAX(e.confidence) AS confidence
+            RETURN entity, type, confidence,
+                   found_in_pmids,
+                   SIZE(found_in_pmids) AS paper_count
+            ORDER BY type, paper_count DESC, confidence DESC
+        """
+        params: dict[str, Any] = {"pmids": pmids}
+        if entity_type_filter:
+            params["type_filter"] = entity_type_filter
+        return self.query(cypher, params)
+
+    def get_entity_cooccurrence(
+        self,
+        entity_name: str,
+        synonyms: list[str] | None = None,
+        entity_type_filter: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Find entities co-mentioned in the same papers as a target entity.
+
+        Uses ExtractedEntity nodes linked via MENTIONED_IN_ABSTRACT.
+
+        Args:
+            entity_name: Name of the target entity (e.g., 'CREBBP', 'glioblastoma').
+            synonyms: Optional list of synonyms/abbreviations to also match
+                (e.g., ['DLBCL', 'diffuse large B-cell lymphoma'] for 'non-Hodgkin lymphoma').
+            entity_type_filter: Optional type to filter results (e.g., 'Gene', 'Drug').
+        """
+        type_clause = (
+            "AND e2.type = $type_filter" if entity_type_filter else ""
+        )
+        cypher = f"""
+            MATCH (e1:ExtractedEntity)<-[:MENTIONED_IN_ABSTRACT]-(p:Paper)
+                  -[:MENTIONED_IN_ABSTRACT]->(e2:ExtractedEntity)
+            WHERE ANY(term IN $search_terms
+                      WHERE toLower(e1.name) = toLower(term)
+                         OR toLower(e1.name) CONTAINS toLower(term))
+              AND e1 <> e2
+              {type_clause}
+            RETURN e2.name AS entity, e2.type AS type,
+                   COUNT(DISTINCT p) AS shared_papers,
+                   COLLECT(DISTINCT p.pmid)[..5] AS example_pmids
+            ORDER BY shared_papers DESC
+            LIMIT 15
+        """
+        search_terms = [entity_name] + (synonyms or [])
+        params: dict[str, Any] = {"search_terms": search_terms}
+        if entity_type_filter:
+            params["type_filter"] = entity_type_filter
+        return self.query(cypher, params)
 
     def get_genes_in_same_papers(
         self, target_gene: str, mesh_filter: str | None = None

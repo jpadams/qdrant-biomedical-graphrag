@@ -39,10 +39,12 @@ Steps:
 2. Pick the best Neo4j tool(s) and fill arguments using ONLY the entities listed.
 3. Do NOT invent entity names — use the exact strings provided.
 
-IMPORTANT:
-- For get_collaborators_with_topics: pick author_name from the Authors list and topics from the MeSH Terms list below. Copy-paste the EXACT MeSH term strings. Do NOT paraphrase (e.g. use "Neoplasms" not "cancer"). Set require_all=false unless the user explicitly asks for ALL topics. PREFER authors with higher paper counts — they have richer collaboration networks.
-- For get_related_papers_by_mesh: pick a pmid from the list below.
-- For get_genes_in_same_papers: pick a gene from the list below.
+Tool Selection Guide:
+- ALWAYS call get_entities_for_papers with the PMIDs from the retrieved papers. This is the PRIMARY enrichment tool — it returns all biomedical entities (genes, diseases, drugs, etc.) extracted from the actual paper abstracts. Use entity_type_filter to focus on specific types relevant to the question (e.g., "Gene" for gene-related questions, "Drug" for treatment questions).
+- Use get_entity_cooccurrence to explore connections BEYOND the retrieved papers. Pick an entity central to the question and find what else co-occurs with it across the full corpus. For diseases or entities with known synonyms, include the synonyms parameter (e.g., entity_name="non-Hodgkin lymphoma", synonyms=["NHL", "DLBCL", "diffuse large B-cell lymphoma"]).
+- For get_collaborators_with_topics: pick author_name from the Authors list and topics from the MeSH Terms list. Copy-paste the EXACT MeSH term strings. Do NOT paraphrase (e.g. use "Neoplasms" not "cancer"). Set require_all=false unless the user explicitly asks for ALL topics. PREFER authors with higher paper counts.
+- For get_related_papers_by_mesh: pick a pmid from the PMIDs list.
+- For get_genes_in_same_papers: pick a gene from the Genes list. Note: this queries curated NCBI gene links only.
 - The exclude_pmids parameter is auto-filled. Do NOT set it.
 
 Neo4j Graph Schema:
@@ -55,7 +57,8 @@ Extracted Entities from Retrieved Papers:
 - PMIDs: {pmids}
 - Authors: {authors}
 - MeSH Terms: {mesh_terms}
-- Genes: {genes}
+- Genes (curated NCBI links): {genes}
+- Entities (NER-extracted from abstracts): {entities}
 """
 
 FUSION_SUMMARY_PROMPT = """
@@ -76,7 +79,9 @@ A numbered list of exactly {limit} finding(s) — one per retrieved paper. Each 
 Describe what the Neo4j knowledge graph revealed. Use bullet points (- ) for each insight. Consider ALL of the following if present in the Neo4j results:
 - **Related papers by MeSH terms**: papers sharing MeSH descriptors with the retrieved papers (look for get_related_papers_by_mesh results). Mention the titles and shared term counts.
 - **Collaborator networks**: co-authors filtered by topic (look for get_collaborators_with_topics results). Mention names and paper counts.
+- **Entities in retrieved papers**: genes, drugs, diseases, proteins, and other biomedical entities extracted from the retrieved paper abstracts (look for get_entities_for_papers results). Group by type and highlight entities that appear across multiple papers.
 - **Gene co-occurrence**: genes mentioned in the same papers (look for get_genes_in_same_papers results).
+- **Entity co-occurrence**: entities co-mentioned across the broader corpus (look for get_entity_cooccurrence results). Highlight cross-type connections (e.g., drugs co-mentioned with a gene).
 
 ### Synthesis
 A concise paragraph combining both sources into a cohesive answer. Mention how graph data confirms, extends, or adds context to the paper findings. End with any limitations or gaps.

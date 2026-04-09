@@ -17,6 +17,20 @@ def create_minimal_pipeline() -> ExtractionPipeline:
     )
 
 
+def create_gliner_pipeline() -> ExtractionPipeline:
+    """Gene gazetteer + GLiNER for NER only. Fast, local, no LLM API calls."""
+    from biomedical_graphrag.extraction.gene_gazetteer import GeneGazetteerExtractor
+    from biomedical_graphrag.extraction.gliner_extractor import GLiNERBiomedExtractor
+
+    return ExtractionPipeline(
+        stages=[
+            GeneGazetteerExtractor(),
+            GLiNERBiomedExtractor(extract_relations=False),
+        ],
+        merge_strategy=MergeStrategy.CONFIDENCE,
+    )
+
+
 def create_maximal_pipeline() -> ExtractionPipeline:
     """All tools: HuggingFace NER -> GLiNER-BioMed -> LLM fallback.
 

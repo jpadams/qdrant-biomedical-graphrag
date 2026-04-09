@@ -58,7 +58,7 @@ class PubMedSettings(BaseModel):
 class ExtractionSettings(BaseModel):
     mode: str = Field(
         default="none",
-        description="Extraction mode: none, minimal (OpenAI-only), maximal (scispaCy+GLiNER+LLM)",
+        description="Extraction mode: none, minimal (OpenAI-only), gliner (GLiNER+GLiREL), maximal (HF+GLiNER+LLM)",
     )
     confidence_threshold: float = Field(
         default=0.3, description="Minimum confidence for extracted entities"

@@ -48,7 +48,12 @@ ingest-all-minimal: ## Unified ingestion with OpenAI entity extraction
 	uv run src/biomedical_graphrag/infrastructure/unified_ingestion.py --extraction-mode minimal
 	@echo "Unified ingestion complete."
 
-ingest-all-maximal: ## Unified ingestion with full NLP extraction pipeline (scispaCy+GLiNER+LLM)
+ingest-all-gliner: ## Unified ingestion with GLiNER + GLiREL extraction (fast, local-only)
+	@echo "Running unified ingestion with GLiNER extraction..."
+	uv run src/biomedical_graphrag/infrastructure/unified_ingestion.py --extraction-mode gliner
+	@echo "Unified ingestion complete."
+
+ingest-all-maximal: ## Unified ingestion with full NLP extraction pipeline (HF+GLiNER+LLM)
 	@echo "Running unified ingestion with maximal extraction..."
 	uv run src/biomedical_graphrag/infrastructure/unified_ingestion.py --extraction-mode maximal
 	@echo "Unified ingestion complete."

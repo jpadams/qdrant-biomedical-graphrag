@@ -207,3 +207,6 @@ marimo/_lsp/
 __marimo__/
 NEO4J_README.md
 .vercel
+
+# Extraction cache (large, regenerable)
+data/.extraction_cache/

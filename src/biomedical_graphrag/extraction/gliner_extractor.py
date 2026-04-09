@@ -13,6 +13,7 @@ from biomedical_graphrag.extraction.base import (
 )
 from biomedical_graphrag.extraction.schema import (
     BIOMEDICAL_RELATION_TYPES,
+    GLIREL_RELATION_LABELS,
     GLINER_BIOMEDICAL_LABELS,
 )
 from biomedical_graphrag.utils.logger_util import setup_logging
@@ -128,6 +129,44 @@ class GLiNERBiomedExtractor:
             )
         return entities
 
+    @staticmethod
+    def _tokenize(text: str) -> list[tuple[str, int, int]]:
+        """Tokenize text the same way GLiREL does internally.
+
+        Returns list of (token, char_start, char_end) tuples.
+        """
+        import re as _re
+
+        return [
+            (m.group(), m.start(), m.end())
+            for m in _re.finditer(r"\w+(?:[-_]\w+)*|\S", text)
+        ]
+
+    def _char_to_token_spans(
+        self, text: str, entities: list[ExtractedEntity]
+    ) -> list[list[int | str]]:
+        """Convert entity character spans to token index spans for GLiREL."""
+        tokens = self._tokenize(text)
+
+        # Build char offset -> token index lookup
+        char_to_tok: dict[int, int] = {}
+        for idx, (_tok, start, end) in enumerate(tokens):
+            for c in range(start, end):
+                char_to_tok[c] = idx
+
+        ner_spans: list[list[int | str]] = []
+        for e in entities:
+            if e.start_pos is None or e.end_pos is None:
+                continue
+            start_tok = char_to_tok.get(e.start_pos)
+            end_tok = char_to_tok.get(e.end_pos - 1)
+            if start_tok is None or end_tok is None:
+                continue
+            # GLiREL expects [start_token, end_token, label, text]
+            ner_spans.append([start_tok, end_tok, e.type, e.name])
+
+        return ner_spans
+
     def _extract_relations_sync(
         self, text: str, entities: list[ExtractedEntity]
     ) -> list[ExtractedRelation]:
@@ -139,35 +178,42 @@ class GLiNERBiomedExtractor:
         if len(entities) < 2:
             return []
 
-        # Build NER spans with character positions for GLiREL
-        ner_spans: list[list[int | str]] = []
-        for e in entities:
-            if e.start_pos is None or e.end_pos is None:
-                continue
-            # GLiREL expects [start_char, end_char, label, text]
-            ner_spans.append([e.start_pos, e.end_pos - 1, e.type, e.name])
+        ner_spans = self._char_to_token_spans(text, entities)
 
         if len(ner_spans) < 2:
             return []
 
-        relation_labels = BIOMEDICAL_RELATION_TYPES
+        # GLiREL expects labels as a list of natural language strings
+        relation_labels = list(GLIREL_RELATION_LABELS.values())
 
         try:
-            predictions = glirel.predict_relations(
+            # Use threshold=0.0 to see all candidates, then filter ourselves
+            all_predictions = glirel.predict_relations(
                 text,
                 relation_labels,
-                threshold=self.relation_threshold,
+                threshold=0.0,
                 ner=ner_spans,
             )
+            if all_predictions:
+                scores = [p.get("score", 0) for p in all_predictions]
+                logger.debug(
+                    f"  GLiREL raw: {len(all_predictions)} candidates, "
+                    f"scores: min={min(scores):.3f} max={max(scores):.3f} "
+                    f"median={sorted(scores)[len(scores)//2]:.3f}, "
+                    f"above {self.relation_threshold}: {sum(1 for s in scores if s >= self.relation_threshold)}"
+                )
+            predictions = [p for p in all_predictions if p.get("score", 0) >= self.relation_threshold]
         except Exception as e:
             logger.warning(f"GLiREL prediction failed: {e}")
             return []
 
+        # Map natural language labels back to canonical relation types
+        label_to_type = {v: k for k, v in GLIREL_RELATION_LABELS.items()}
+
         relations: list[ExtractedRelation] = []
         for pred in predictions:
-            rel_type = pred.get("label", "ASSOCIATED_WITH").upper().replace(" ", "_")
-            if rel_type not in BIOMEDICAL_RELATION_TYPES:
-                rel_type = "ASSOCIATED_WITH"
+            raw_label = pred.get("label", "")
+            rel_type = label_to_type.get(raw_label, "ASSOCIATED_WITH")
 
             head = pred.get("head_text", "")
             tail = pred.get("tail_text", "")

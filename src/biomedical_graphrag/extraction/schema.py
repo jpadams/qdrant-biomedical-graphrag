@@ -23,6 +23,18 @@ BIOMEDICAL_RELATION_TYPES = [
     "INTERACTS_WITH",
 ]
 
+# ── GLiREL relation label descriptions (improve zero-shot accuracy) ───
+GLIREL_RELATION_LABELS: dict[str, str] = {
+    "TARGETS": "targets, acts on, or binds to (e.g., a drug targets a protein, a technique targets a gene)",
+    "ASSOCIATED_WITH": "is associated with or related to (e.g., a gene is associated with a disease)",
+    "TREATS": "is used to treat or manage (e.g., a drug treats a disease)",
+    "EXPRESSED_IN": "is expressed in or found in (e.g., a gene is expressed in a cell type or tissue)",
+    "INHIBITS": "inhibits, suppresses, or blocks (e.g., a drug inhibits an enzyme or process)",
+    "ACTIVATES": "activates, induces, or promotes (e.g., a protein activates a signaling pathway)",
+    "DERIVED_FROM": "is derived from or originates from (e.g., a cell line is derived from a tissue)",
+    "INTERACTS_WITH": "interacts with or binds to (e.g., two proteins form a complex)",
+}
+
 # ── GLiNER label descriptions (improve zero-shot accuracy) ─────────────
 GLINER_BIOMEDICAL_LABELS: dict[str, str] = {
     "Gene": "A named gene or gene symbol (e.g., TP53, BRCA1, NOTCH1, RB1, CCND1)",

@@ -331,6 +331,50 @@ class Neo4jGraphIngestion:
         if all_relations:
             logger.info(f"✅ Created {len(all_relations)} inter-entity relationships.")
 
+        # Promote entity types to secondary Neo4j labels
+        await self._promote_entity_labels()
+
+        # Add MENTIONED_IN relationships for Gene entities (unifies with curated genes)
+        await self._create_gene_mentioned_in_links()
+
+    async def _promote_entity_labels(self, confidence_threshold: float = 0.85) -> None:
+        """Add the entity type as a secondary Neo4j label on high-confidence ExtractedEntity nodes.
+
+        E.g., an ExtractedEntity with type='Gene' becomes (:ExtractedEntity:Gene).
+        """
+        from biomedical_graphrag.extraction.schema import BIOMEDICAL_ENTITY_TYPES
+
+        for entity_type in BIOMEDICAL_ENTITY_TYPES:
+            query = f"""
+            MATCH (e:ExtractedEntity)
+            WHERE e.type = $type AND e.confidence >= $threshold
+            SET e:{entity_type}
+            RETURN count(e) AS promoted
+            """
+            result = await self.client.create_graph(
+                query, {"type": entity_type, "threshold": confidence_threshold}
+            )
+            count = result[0]["promoted"] if result else 0
+            if count > 0:
+                logger.info(f"  Promoted {count} ExtractedEntity nodes to :{entity_type}")
+
+        logger.info("✅ Entity type label promotion complete.")
+
+    async def _create_gene_mentioned_in_links(self) -> None:
+        """Create (Gene)-[:MENTIONED_IN]->(Paper) for extracted Gene entities.
+
+        This unifies extracted genes with curated NCBI genes so that
+        get_genes_in_same_papers works for both.
+        """
+        query = """
+        MATCH (p:Paper)-[:MENTIONED_IN_ABSTRACT]->(e:ExtractedEntity:Gene)
+        MERGE (e)-[:MENTIONED_IN]->(p)
+        RETURN count(*) AS created
+        """
+        result = await self.client.create_graph(query, {})
+        count = result[0]["created"] if result else 0
+        logger.info(f"✅ Created {count} Gene MENTIONED_IN links (extracted → paper).")
+
     # =====================================================
     # ============== RELATIONSHIP HELPERS =================
     # =====================================================

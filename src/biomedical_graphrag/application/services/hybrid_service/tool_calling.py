@@ -58,6 +58,22 @@ def _extract_qdrant_context(qdrant_results: list[dict]) -> dict[str, list[str]]:
     }
 
 
+def _get_extracted_entities_for_pmids(neo4j: Neo4jGraphQuery, pmids: list[str]) -> list[str]:
+    """Query Neo4j for extracted entities linked to the retrieved papers."""
+    if not pmids:
+        return []
+    results = neo4j.query(
+        """
+        UNWIND $pmids AS pmid
+        MATCH (p:Paper {pmid: pmid})-[:MENTIONED_IN_ABSTRACT]->(e:ExtractedEntity)
+        RETURN DISTINCT e.name AS name, e.type AS type
+        ORDER BY e.type, e.name
+        """,
+        {"pmids": pmids[:10]},
+    )
+    return [f"{r['name']} ({r['type']})" for r in results]
+
+
 def _score_authors(neo4j: Neo4jGraphQuery, authors: list[str], mesh_terms: list[str]) -> list[str]: #Might be problematic because terms have different importance to a person using the assistant
     """Score authors by paper count on relevant topics. Returns 'Name (N papers)' sorted by count."""
     if not authors:
@@ -191,7 +207,11 @@ def run_graph_enrichment(question: str, qdrant_results: list[dict]) -> Neo4jEnri
     # Extract structured context from Qdrant results
     ctx = _extract_qdrant_context(qdrant_results)
     scored_authors = _score_authors(neo4j, ctx["authors"], ctx["mesh_terms"])
-    logger.info(f"Qdrant context: {len(ctx['pmids'])} PMIDs, {len(scored_authors)} scored authors, {len(ctx['mesh_terms'])} MeSH, {len(ctx['genes'])} genes")
+    extracted_entities = _get_extracted_entities_for_pmids(neo4j, ctx["pmids"])
+    logger.info(
+        f"Qdrant context: {len(ctx['pmids'])} PMIDs, {len(scored_authors)} scored authors, "
+        f"{len(ctx['mesh_terms'])} MeSH, {len(ctx['genes'])} genes, {len(extracted_entities)} extracted entities"
+    )
 
     try:
         prompt = NEO4J_PROMPT.format(
@@ -201,6 +221,7 @@ def run_graph_enrichment(question: str, qdrant_results: list[dict]) -> Neo4jEnri
             authors="; ".join(scored_authors[:15]) or "None",
             mesh_terms=", ".join(ctx["mesh_terms"][:30]) or "None",
             genes=", ".join(ctx["genes"][:20]) or "None",
+            entities=", ".join(extracted_entities[:40]) or "None",
         )
 
         response = openai_client.responses.create(  # type: ignore[call-overload]
