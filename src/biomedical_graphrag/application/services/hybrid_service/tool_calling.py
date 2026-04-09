@@ -28,16 +28,20 @@ logger = setup_logging()
 openai_client = OpenAI(api_key=settings.openai.api_key.get_secret_value())
 
 
-def _extract_qdrant_context(qdrant_results: list[dict]) -> dict[str, list[str]]: #Is it a reverse engineering approach of Paper class?
+def _extract_qdrant_context(qdrant_results: list[dict]) -> dict[str, list[str]]:
     """Extract structured entities from Qdrant results for Neo4j tool pre-fill."""
     pmids: list[str] = []
+    pmid_mesh_counts: dict[str, int] = {}
     authors: list[str] = []
     mesh_terms: list[str] = []
     genes: list[str] = []
     for r in qdrant_results:
         paper = r.get("payload", {}).get("paper", {})
-        if paper.get("pmid"):
-            pmids.append(paper["pmid"])
+        pmid = paper.get("pmid")
+        if pmid:
+            pmids.append(pmid)
+            paper_mesh = paper.get("mesh_terms", [])
+            pmid_mesh_counts[pmid] = len(paper_mesh)
         for a in paper.get("authors", []):
             name = a.get("name") if isinstance(a, dict) else str(a)
             if name:
@@ -50,8 +54,16 @@ def _extract_qdrant_context(qdrant_results: list[dict]) -> dict[str, list[str]]:
             name = g.get("name") if isinstance(g, dict) else str(g)
             if name:
                 genes.append(name)
+
+    # Format PMIDs with MeSH counts so the LLM can pick wisely
+    pmids_with_mesh = []
+    for pmid in dict.fromkeys(pmids):
+        count = pmid_mesh_counts.get(pmid, 0)
+        pmids_with_mesh.append(f"{pmid} ({count} MeSH terms)")
+
     return {
         "pmids": list(dict.fromkeys(pmids)),
+        "pmids_with_mesh": pmids_with_mesh,
         "authors": list(dict.fromkeys(authors)),
         "mesh_terms": list(dict.fromkeys(mesh_terms)),
         "genes": list(dict.fromkeys(genes)),
@@ -217,7 +229,7 @@ def run_graph_enrichment(question: str, qdrant_results: list[dict]) -> Neo4jEnri
         prompt = NEO4J_PROMPT.format(
             schema=schema,
             question=question,
-            pmids=", ".join(ctx["pmids"]) or "None",
+            pmids=", ".join(ctx["pmids_with_mesh"]) or "None",
             authors="; ".join(scored_authors[:15]) or "None",
             mesh_terms=", ".join(ctx["mesh_terms"][:30]) or "None",
             genes=", ".join(ctx["genes"][:20]) or "None",

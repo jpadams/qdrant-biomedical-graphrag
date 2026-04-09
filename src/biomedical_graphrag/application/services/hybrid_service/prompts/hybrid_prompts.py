@@ -41,7 +41,7 @@ Steps:
 
 Tool Selection Guide:
 - ALWAYS call get_entities_for_papers with the PMIDs from the retrieved papers. This is the PRIMARY enrichment tool — it returns all biomedical entities (genes, diseases, drugs, etc.) extracted from the actual paper abstracts. Use entity_type_filter to focus on specific types relevant to the question (e.g., "Gene" for gene-related questions, "Drug" for treatment questions).
-- ALWAYS call get_related_papers_by_mesh with one of the PMIDs from the retrieved papers (pick the most relevant one to the user's question). This finds additional papers sharing MeSH descriptors with the selected paper.
+- ALWAYS call get_related_papers_by_mesh with one of the PMIDs from the retrieved papers. Pick the PMID with the MOST MeSH terms (shown in parentheses next to each PMID). Papers with 0 MeSH terms will return no results — skip those.
 - Use get_entity_cooccurrence to explore connections BEYOND the retrieved papers. Pick an entity central to the question and find what else co-occurs with it across the full corpus. For diseases or entities with known synonyms, include the synonyms parameter (e.g., entity_name="non-Hodgkin lymphoma", synonyms=["NHL", "DLBCL", "diffuse large B-cell lymphoma"]).
 - For get_collaborators_with_topics: pick author_name from the Authors list and topics from the MeSH Terms list. Copy-paste the EXACT MeSH term strings. Do NOT paraphrase (e.g. use "Neoplasms" not "cancer"). Set require_all=false unless the user explicitly asks for ALL topics. PREFER authors with higher paper counts.
 - For get_related_papers_by_mesh: pick a pmid from the PMIDs list.
