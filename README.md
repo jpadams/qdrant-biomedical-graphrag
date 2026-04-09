@@ -61,7 +61,7 @@ A biomedical context engineering system. An agent uses Qdrant vector search engi
 - **Neo4j Graph Database**: Graph enrichment via ontology-based tools (collaborator networks, MeSH relations, gene co-mentions)
 - **Data Integration**: Processes PubMed papers, gene data, and research citations
 - **Biomedical Schema**: Specialized graph schema for papers, authors, institutions, genes, and MeSH terms
-- **Entity Extraction**: Multi-stage NLP pipeline (scispaCy, GLiNER-BioMed, LLM) extracts genes, proteins, diseases, drugs, techniques, and more from abstracts
+- **Entity Extraction**: Multi-stage NLP pipeline (HuggingFace NER, GLiNER-BioMed, LLM) extracts genes, proteins, diseases, drugs, techniques, and more from abstracts
 - **Unified Ingestion**: Lock-step Qdrant + Neo4j ingestion with cross-reference IDs and optional entity extraction
 - **Async Processing**: High-performance async data collection and processing
 
@@ -266,20 +266,16 @@ make ingest-all-minimal
 
 Uses OpenAI structured output (gpt-4o-mini by default) to extract entities and relationships in a single API call per abstract. Cost: ~$0.50 per 10k abstracts.
 
-**Maximal mode** (scispaCy + GLiNER-BioMed + LLM fallback):
+**Maximal mode** (HuggingFace NER + GLiNER-BioMed + LLM fallback):
 
 ```bash
-# Install optional extraction dependencies first
-uv pip install ".[extraction-full]"
-
-# scispaCy models (diseases/chemicals + proteins/genes/organisms)
-pip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_ner_bc5cdr_md-0.5.4.tar.gz
-pip install https://s3-us-west-2.amazonaws.com/ai2-s2-scispacy/releases/v0.5.4/en_ner_craft_md-0.5.4.tar.gz
+# Install extraction dependencies (transformers, torch, GLiNER, GLiREL)
+uv sync --all-extras
 
 make ingest-all-maximal
 ```
 
-Runs a multi-stage pipeline: scispaCy (fast baseline) -> GLiNER-BioMed (zero-shot NER) -> LLM (fallback). Results are merged using a confidence-based strategy. If any stage is unavailable (missing dependency), it falls back gracefully.
+Runs a multi-stage pipeline: HuggingFace biomedical NER (`Kushtrim/bert-base-cased-biomedical-ner`) -> GLiNER-BioMed (zero-shot NER) -> LLM (fallback). Results are merged using a confidence-based strategy. If any stage is unavailable (missing dependency), it falls back gracefully.
 
 **Configuration** (`.env`):
 

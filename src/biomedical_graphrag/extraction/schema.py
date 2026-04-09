@@ -60,22 +60,6 @@ GLINER_BIOMEDICAL_LABELS: dict[str, str] = {
     ),
 }
 
-# ── scispaCy label → our type mappings ─────────────────────────────────
-SCISPACY_BC5CDR_MAPPING: dict[str, str] = {
-    "DISEASE": "Disease",
-    "CHEMICAL": "Drug",
-}
-
-SCISPACY_CRAFT_MAPPING: dict[str, str] = {
-    "GGP": "Protein",   # Gene or Gene Product
-    "SO": "Gene",        # Sequence Ontology
-    "TAXON": "Organism",
-    "CL": "CellType",   # Cell Ontology
-    "CHEBI": "Drug",     # Chemical Entities of Biological Interest
-    "GO": "BiologicalProcess",  # Gene Ontology
-    "PR": "Protein",     # Protein Ontology
-}
-
 # ── LLM extraction prompt ──────────────────────────────────────────────
 LLM_EXTRACTION_SYSTEM_PROMPT = """\
 You are a biomedical named entity recognition and relationship extraction system.

@@ -18,21 +18,24 @@ def create_minimal_pipeline() -> ExtractionPipeline:
 
 
 def create_maximal_pipeline() -> ExtractionPipeline:
-    """All tools: scispaCy -> GLiNER-BioMed -> LLM fallback.
+    """All tools: HuggingFace NER -> GLiNER-BioMed -> LLM fallback.
 
-    Requires optional dependencies: scispacy, gliner, glirel.
+    Requires optional dependencies: transformers, torch, gliner, glirel.
     Falls back gracefully if any are unavailable.
     """
     stages = []
 
-    # Stage 1: scispaCy (fast baseline)
+    # Stage 1: HuggingFace biomedical NER (fast baseline)
     try:
-        from biomedical_graphrag.extraction.spacy_extractor import ScispaCyExtractor
+        from biomedical_graphrag.extraction.hf_extractor import HuggingFaceNERExtractor
 
-        stages.append(ScispaCyExtractor())
-        logger.info("Maximal pipeline: scispaCy loaded")
+        stages.append(HuggingFaceNERExtractor())
+        logger.info("Maximal pipeline: HuggingFace NER loaded")
     except ImportError:
-        logger.warning("scispaCy not available, skipping (pip install scispacy)")
+        logger.warning(
+            "transformers not available, skipping HF NER "
+            "(pip install transformers torch)"
+        )
 
     # Stage 2: GLiNER-BioMed (zero-shot)
     try:
