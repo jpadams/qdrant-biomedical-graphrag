@@ -246,3 +246,76 @@ class Neo4jGraphQuery:
             LIMIT 10
         """
         return self.query(cypher, {"target_gene": target_gene, "mesh_filter": mesh_filter})
+
+    def get_entity_community(
+        self, entity_name: str,
+    ) -> list[dict[str, Any]]:
+        """Get other entities in the same community as the target entity.
+
+        Requires community_id property from Louvain (run graph analytics first).
+        """
+        cypher = """
+            MATCH (e1:ExtractedEntity)
+            WHERE toLower(e1.name) = toLower($entity_name)
+              AND e1.community_id IS NOT NULL
+            WITH e1.community_id AS cid
+            MATCH (e2:ExtractedEntity {community_id: cid})
+            WHERE toLower(e2.name) <> toLower($entity_name)
+              AND e2.confidence >= 0.75
+              AND size(e2.name) <= 60
+            RETURN e2.name AS entity, e2.type AS type,
+                   e2.pagerank AS pagerank,
+                   cid AS community_id
+            ORDER BY e2.pagerank DESC
+            LIMIT 15
+        """
+        return self.query(cypher, {"entity_name": entity_name})
+
+    def get_top_central_entities(
+        self, entity_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get the most central entities by PageRank.
+
+        Requires pagerank property (run graph analytics first).
+        """
+        type_clause = "AND e.type = $entity_type" if entity_type else ""
+        cypher = f"""
+            MATCH (e:ExtractedEntity)
+            WHERE e.pagerank IS NOT NULL
+              AND e.confidence >= 0.75
+              AND size(e.name) <= 60
+              {type_clause}
+            RETURN e.name AS entity, e.type AS type,
+                   e.pagerank AS pagerank,
+                   e.betweenness AS betweenness,
+                   e.community_id AS community_id
+            ORDER BY e.pagerank DESC
+            LIMIT 15
+        """
+        params: dict[str, Any] = {}
+        if entity_type:
+            params["entity_type"] = entity_type
+        return self.query(cypher, params)
+
+    def get_research_opportunities(
+        self, entity_name: str,
+    ) -> list[dict[str, Any]]:
+        """Get predicted cross-type connections for an entity — research opportunities.
+
+        Returns entities of a DIFFERENT type that are structurally similar
+        (shared co-occurrence neighbors) but never appear in the same paper.
+        These represent unexplored intersections — e.g., a Gene and Drug that
+        appear in similar research contexts but no paper studies them together.
+
+        Requires PREDICTED_LINK relationships (run graph analytics first).
+        """
+        cypher = """
+            MATCH (e1:ExtractedEntity)-[r:PREDICTED_LINK]-(e2:ExtractedEntity)
+            WHERE toLower(e1.name) = toLower($entity_name)
+              AND e1.type <> e2.type
+            RETURN e2.name AS entity, e2.type AS type,
+                   r.similarity AS similarity
+            ORDER BY r.similarity DESC
+            LIMIT 10
+        """
+        return self.query(cypher, {"entity_name": entity_name})

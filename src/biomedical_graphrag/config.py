@@ -71,6 +71,15 @@ class ExtractionSettings(BaseModel):
     )
 
 
+class GDSSettings(BaseModel):
+    client_id: str = Field(default="", description="Aura API client ID for Graph Analytics")
+    client_secret: SecretStr = Field(default=SecretStr(""), description="Aura API client secret")
+    project_id: str = Field(default="", description="Aura project ID (required if account has multiple projects)")
+    aura_instance_id: str = Field(default="", description="AuraDB instance ID")
+    session_memory: str = Field(default="4GB", description="GDS session memory (2GB, 4GB, 8GB)")
+    session_ttl_minutes: int = Field(default=30, description="Session auto-expire after N minutes idle")
+
+
 class JsonDataSettings(BaseModel):
     pubmed_json_path: str = Field(
         default="data/pubmed_dataset.json", description="Path to the PubMed JSON dataset"
@@ -100,6 +109,7 @@ class Settings(BaseSettings):
     qdrant: QdrantSettings = QdrantSettings()
     pubmed: PubMedSettings = PubMedSettings()
     extraction: ExtractionSettings = ExtractionSettings()
+    gds: GDSSettings = GDSSettings()
     json_data: JsonDataSettings = JsonDataSettings()
 
     @model_validator(mode="after")

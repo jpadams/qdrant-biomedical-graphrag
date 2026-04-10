@@ -46,6 +46,9 @@ Tool Selection Guide:
 - For get_collaborators_with_topics: pick author_name from the Authors list and topics from the MeSH Terms list. Copy-paste the EXACT MeSH term strings. Do NOT paraphrase (e.g. use "Neoplasms" not "cancer"). Set require_all=false unless the user explicitly asks for ALL topics. PREFER authors with higher paper counts.
 - For get_related_papers_by_mesh: pick a pmid from the PMIDs list.
 - For get_genes_in_same_papers: pick a gene from the Genes list. Note: this queries curated NCBI gene links only.
+- For get_entity_community: pick an entity from the Entities list. Returns other entities in the same research community (cluster). Only works if graph analytics have been run.
+- For get_research_opportunities: pick an entity central to the user's question. Returns cross-type predicted connections (e.g., Gene↔Drug, Gene↔Disease) — entities in similar research contexts that are never studied together. Frame these as research opportunities. Only works if graph analytics have been run.
+- For get_top_central_entities: returns the most influential entities by PageRank. Use entity_type to filter (e.g., "Gene"). Only works if graph analytics have been run.
 - The exclude_pmids parameter is auto-filled. Do NOT set it.
 
 Neo4j Graph Schema:
@@ -83,6 +86,9 @@ Describe what the Neo4j knowledge graph revealed. Use bullet points (- ) for eac
 - **Entities in retrieved papers**: genes, drugs, diseases, proteins, and other biomedical entities extracted from the retrieved paper abstracts (look for get_entities_for_papers results). Group by type and highlight entities that appear across multiple papers.
 - **Gene co-occurrence**: genes mentioned in the same papers (look for get_genes_in_same_papers results).
 - **Entity co-occurrence**: entities co-mentioned across the broader corpus (look for get_entity_cooccurrence results). Highlight cross-type connections (e.g., drugs co-mentioned with a gene).
+- **Research communities**: clusters of entities that form research themes (look for get_entity_community results). Describe what the community represents.
+- **Hub entities**: the most influential entities by centrality (look for get_top_central_entities results).
+- **Research opportunities**: cross-type entity pairs predicted to be related but not yet studied together (look for get_research_opportunities results). Frame these as actionable research opportunities — e.g., "Gene X and Drug Y appear in similar research contexts but no paper in the corpus directly connects them."
 
 ### Synthesis
 A concise paragraph combining both sources into a cohesive answer. Mention how graph data confirms, extends, or adds context to the paper findings. End with any limitations or gaps.
