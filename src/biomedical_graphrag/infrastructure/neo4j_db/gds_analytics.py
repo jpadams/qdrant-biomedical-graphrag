@@ -19,19 +19,33 @@ logger = setup_logging()
 # to keep the projected graph within memory limits.
 # Uses gds.graph.project.remote() for Aura Graph Analytics compatibility.
 ENTITY_COOCCURRENCE_PROJECTION = """
-    MATCH (e1:ExtractedEntity)<-[:MENTIONED_IN_ABSTRACT]-(p:Paper)
-          -[:MENTIONED_IN_ABSTRACT]->(e2:ExtractedEntity)
-    WHERE e1 <> e2
-      AND e1.confidence >= 0.85
-      AND e2.confidence >= 0.85
-      AND size(e1.name) <= 40
-      AND size(e2.name) <= 40
-      AND id(e1) < id(e2)
-    WITH e1, e2, count(DISTINCT p) AS weight
-    WHERE weight >= 2
-    RETURN gds.graph.project.remote(e1, e2, {
-      sourceNodeLabels: labels(e1),
-      targetNodeLabels: labels(e2),
+    CALL {
+        // ExtractedEntity co-occurrence via shared papers
+        MATCH (e1:ExtractedEntity)<-[:MENTIONED_IN_ABSTRACT]-(p:Paper)
+              -[:MENTIONED_IN_ABSTRACT]->(e2:ExtractedEntity)
+        WHERE e1 <> e2
+          AND e1.confidence >= 0.85
+          AND e2.confidence >= 0.85
+          AND size(e1.name) <= 40
+          AND size(e2.name) <= 40
+          AND id(e1) < id(e2)
+        WITH e1 AS n1, e2 AS n2, count(DISTINCT p) AS weight
+        WHERE weight >= 2
+        RETURN n1, n2, weight
+        UNION
+        // Cross-links: curated Gene + ExtractedEntity via shared papers
+        MATCH (g:Gene)-[:MENTIONED_IN]->(p:Paper)-[:MENTIONED_IN_ABSTRACT]->(e:ExtractedEntity)
+        WHERE NOT g:ExtractedEntity
+          AND e.confidence >= 0.85
+          AND size(e.name) <= 40
+        WITH g, e, count(DISTINCT p) AS weight
+        WHERE weight >= 3
+        WITH g AS n1, e AS n2, weight
+        RETURN n1, n2, weight
+    }
+    RETURN gds.graph.project.remote(n1, n2, {
+      sourceNodeLabels: labels(n1),
+      targetNodeLabels: labels(n2),
       relationshipType: 'CO_OCCURS_WITH',
       relationshipProperties: {weight: weight}
     })
@@ -197,17 +211,36 @@ class GraphAnalytics:
 
         try:
             with driver.session() as session:
+                # Compute p95 PageRank threshold to exclude hub entities
+                pr_result = session.run(
+                    """
+                    MATCH (e:ExtractedEntity)
+                    WHERE e.pagerank IS NOT NULL
+                    RETURN percentileCont(e.pagerank, 0.95) AS pr_cap
+                    """
+                )
+                pr_cap = pr_result.single()["pr_cap"]
+                logger.info(f"  PageRank p95 threshold: {pr_cap:.4f}")
+
                 result = session.run(
                     """
-                    MATCH (e1:ExtractedEntity)-[r:PREDICTED_LINK]->(e2:ExtractedEntity)
-                    WHERE e1.type <> e2.type
+                    MATCH (e1)-[r:PREDICTED_LINK]->(e2)
+                    WHERE (
+                        (e1.type = 'Gene' AND e2.type IN ['Protein', 'Disease'])
+                        OR (e1.type = 'Protein' AND e2.type IN ['Gene', 'Disease'])
+                        OR (e1.type = 'Disease' AND e2.type IN ['Gene', 'Protein'])
+                      )
+                      AND e1.pagerank IS NOT NULL AND e2.pagerank IS NOT NULL
+                      AND e1.pagerank < $pr_cap AND e2.pagerank < $pr_cap
+                      AND size(e1.name) <= 40 AND size(e2.name) <= 40
+                      AND e1.confidence >= 0.85 AND e2.confidence >= 0.85
                     RETURN e1.name AS entity1, e1.type AS type1,
                            e2.name AS entity2, e2.type AS type2,
                            r.similarity AS similarity
                     ORDER BY r.similarity DESC
                     LIMIT $top_k
                     """,
-                    {"top_k": top_k},
+                    {"top_k": top_k, "pr_cap": pr_cap},
                 )
                 predictions = [dict(record) for record in result]
 

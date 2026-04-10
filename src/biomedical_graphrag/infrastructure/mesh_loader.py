@@ -135,7 +135,7 @@ def _link_mesh_to_entities(
 ) -> dict[str, int]:
     """Internal: create SYNONYM_OF links between MeshTerm and ExtractedEntity nodes."""
 
-    # Step 1: Get all ExtractedEntity normalized names from Neo4j
+    # Step 1: Get all matchable names from Neo4j
     logger.info("Fetching ExtractedEntity names from Neo4j...")
     with driver.session() as session:
         result = session.run(
@@ -144,9 +144,27 @@ def _link_mesh_to_entities(
         entity_names = {record["name"] for record in result}
     logger.info(f"Found {len(entity_names)} unique ExtractedEntity names.")
 
-    # Step 2: Build match pairs — (mesh_ui, entity_normalized_name)
-    logger.info("Matching MeSH entry terms to extracted entities...")
-    match_pairs: list[dict[str, str]] = []
+    logger.info("Fetching Gene names and aliases from Neo4j...")
+    with driver.session() as session:
+        result = session.run(
+            "MATCH (g:Gene) WHERE NOT g:ExtractedEntity RETURN g.name AS name, g.aliases AS aliases"
+        )
+        gene_names: dict[str, str] = {}  # lowercase name -> original name
+        for record in result:
+            name = record["name"]
+            if name:
+                gene_names[name.strip().lower()] = name
+            aliases = record["aliases"] or ""
+            for alias in aliases.split(", "):
+                alias = alias.strip()
+                if alias:
+                    gene_names[alias.strip().lower()] = alias
+    logger.info(f"Found {len(gene_names)} unique Gene names/aliases.")
+
+    # Step 2: Build match pairs
+    logger.info("Matching MeSH entry terms to extracted entities and genes...")
+    entity_match_pairs: list[dict[str, str]] = []
+    gene_match_pairs: list[dict[str, str]] = []
     matched_descriptors = 0
 
     for desc in descriptors:
@@ -155,40 +173,75 @@ def _link_mesh_to_entities(
         for term in all_terms:
             normalized = term.strip().lower()
             if normalized in entity_names:
-                match_pairs.append({"ui": desc.ui, "entity_name": normalized})
+                entity_match_pairs.append({"ui": desc.ui, "entity_name": normalized})
+                desc_matched = True
+            if normalized in gene_names:
+                gene_match_pairs.append({"ui": desc.ui, "gene_name": gene_names[normalized]})
                 desc_matched = True
         if desc_matched:
             matched_descriptors += 1
 
     logger.info(
-        f"Found {len(match_pairs)} term matches across {matched_descriptors} descriptors."
+        f"Found {len(entity_match_pairs)} entity matches + {len(gene_match_pairs)} gene matches "
+        f"across {matched_descriptors} descriptors."
     )
 
-    if not match_pairs:
-        logger.warning("No matches found between MeSH terms and extracted entities.")
-        return {"match_pairs": 0, "matched_descriptors": 0, "relationships_created": 0}
+    if not entity_match_pairs and not gene_match_pairs:
+        logger.warning("No matches found between MeSH terms and graph nodes.")
+        return {"entity_matches": 0, "gene_matches": 0, "matched_descriptors": 0, "relationships_created": 0}
 
-    # Step 3: Batch create SYNONYM_OF relationships
-    logger.info("Creating SYNONYM_OF relationships...")
-    total_created = 0
-    with driver.session() as session:
-        for i in range(0, len(match_pairs), batch_size):
-            chunk = match_pairs[i : i + batch_size]
-            result = session.run(
-                """
-                UNWIND $batch AS row
-                MATCH (m:MeshTerm {ui: row.ui})
-                MATCH (e:ExtractedEntity {normalized_name: row.entity_name})
-                MERGE (m)-[:SYNONYM_OF]->(e)
-                RETURN count(*) AS created
-                """,
-                {"batch": chunk},
-            )
-            total_created += result.single()["created"]
+    # Step 3: Batch create SYNONYM_OF relationships for ExtractedEntity
+    total_entity_created = 0
+    if entity_match_pairs:
+        total_batches = (len(entity_match_pairs) + batch_size - 1) // batch_size
+        logger.info(f"Creating SYNONYM_OF relationships for {len(entity_match_pairs)} entity matches ({total_batches} batches)...")
+        with driver.session() as session:
+            for i in range(0, len(entity_match_pairs), batch_size):
+                chunk = entity_match_pairs[i : i + batch_size]
+                result = session.run(
+                    """
+                    UNWIND $batch AS row
+                    MATCH (m:MeshTerm {ui: row.ui})
+                    MATCH (e:ExtractedEntity {normalized_name: row.entity_name})
+                    MERGE (m)-[:SYNONYM_OF]->(e)
+                    RETURN count(*) AS created
+                    """,
+                    {"batch": chunk},
+                )
+                total_entity_created += result.single()["created"]
+                batch_num = i // batch_size + 1
+                if batch_num % 5 == 0 or batch_num == total_batches:
+                    logger.info(f"  → Entity SYNONYM_OF: batch {batch_num}/{total_batches} ({total_entity_created} created)")
+        logger.info(f"✅ Created {total_entity_created} MeSH→ExtractedEntity SYNONYM_OF relationships.")
 
-    logger.info(f"✅ Created {total_created} SYNONYM_OF relationships.")
+    # Step 4: Batch create SYNONYM_OF relationships for Gene nodes
+    total_gene_created = 0
+    if gene_match_pairs:
+        total_batches = (len(gene_match_pairs) + batch_size - 1) // batch_size
+        logger.info(f"Creating SYNONYM_OF relationships for {len(gene_match_pairs)} gene matches ({total_batches} batches)...")
+        with driver.session() as session:
+            for i in range(0, len(gene_match_pairs), batch_size):
+                chunk = gene_match_pairs[i : i + batch_size]
+                result = session.run(
+                    """
+                    UNWIND $batch AS row
+                    MATCH (m:MeshTerm {ui: row.ui})
+                    MATCH (g:Gene {name: row.gene_name})
+                    WHERE NOT g:ExtractedEntity
+                    MERGE (m)-[:SYNONYM_OF]->(g)
+                    RETURN count(*) AS created
+                    """,
+                    {"batch": chunk},
+                )
+                total_gene_created += result.single()["created"]
+                batch_num = i // batch_size + 1
+                if batch_num % 5 == 0 or batch_num == total_batches:
+                    logger.info(f"  → Gene SYNONYM_OF: batch {batch_num}/{total_batches} ({total_gene_created} created)")
+        logger.info(f"✅ Created {total_gene_created} MeSH→Gene SYNONYM_OF relationships.")
 
-    # Step 4: Store entry terms on MeshTerm nodes for reference
+    total_created = total_entity_created + total_gene_created
+
+    # Step 5: Store entry terms on MeshTerm nodes for reference
     logger.info("Enriching MeshTerm nodes with entry terms...")
     enrichment_batch: list[dict[str, Any]] = []
     # Only enrich MeshTerms that exist in our graph
@@ -218,9 +271,12 @@ def _link_mesh_to_entities(
     logger.info(f"✅ Enriched {len(enrichment_batch)} MeshTerm nodes with entry terms.")
 
     stats = {
-        "match_pairs": len(match_pairs),
+        "entity_matches": len(entity_match_pairs),
+        "gene_matches": len(gene_match_pairs),
         "matched_descriptors": matched_descriptors,
-        "relationships_created": total_created,
+        "entity_relationships_created": total_entity_created,
+        "gene_relationships_created": total_gene_created,
+        "total_relationships_created": total_created,
         "mesh_terms_enriched": len(enrichment_batch),
     }
     logger.info(f"MeSH linking stats: {stats}")

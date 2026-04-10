@@ -64,6 +64,12 @@ run-graph-analytics: ## Run GDS community detection, centrality, and link predic
 	@echo "Graph analytics complete."
 
 link-mesh: ## Link MeSH entry terms (synonyms) to extracted entities in Neo4j
+	@if [ ! -f data/desc2026.gz ]; then \
+		echo "Downloading MeSH descriptors XML..."; \
+		curl -sL -o data/desc2026.gz https://nlmpubs.nlm.nih.gov/projects/mesh/MESH_FILES/xmlmesh/desc2026.gz; \
+	else \
+		echo "MeSH XML already present, skipping download."; \
+	fi
 	@echo "Parsing MeSH XML and linking to extracted entities..."
 	uv run src/biomedical_graphrag/infrastructure/mesh_loader.py
 	@echo "MeSH linking complete."

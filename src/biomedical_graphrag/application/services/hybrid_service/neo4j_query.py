@@ -302,17 +302,34 @@ class Neo4jGraphQuery:
     ) -> list[dict[str, Any]]:
         """Get predicted cross-type connections for an entity — research opportunities.
 
-        Returns entities of a DIFFERENT type that are structurally similar
-        (shared co-occurrence neighbors) but never appear in the same paper.
-        These represent unexplored intersections — e.g., a Gene and Drug that
-        appear in similar research contexts but no paper studies them together.
+        Focused on Gene↔Protein and Gene↔Disease predictions — the most
+        actionable connections for biomedical research. Returns entities that
+        appear in similar research contexts but never co-occur in a paper.
 
         Requires PREDICTED_LINK relationships (run graph analytics first).
         """
         cypher = """
-            MATCH (e1:ExtractedEntity)-[r:PREDICTED_LINK]-(e2:ExtractedEntity)
+            // Exclude entities with too many predicted links (hubs / noise)
+            MATCH (noisy)-[:PREDICTED_LINK]-()
+            WITH noisy, count(*) AS lc
+            WHERE lc > 50
+            WITH collect(noisy.name) AS noisy_names
+            MATCH (e1)-[r:PREDICTED_LINK]-(e2)
             WHERE toLower(e1.name) = toLower($entity_name)
-              AND e1.type <> e2.type
+              AND NOT e1.name IN noisy_names AND NOT e2.name IN noisy_names
+              AND (
+                (e1.type = 'Gene' AND e2.type IN ['Protein', 'Disease'])
+                OR (e1.type = 'Protein' AND e2.type IN ['Gene', 'Disease'])
+                OR (e1.type = 'Disease' AND e2.type IN ['Gene', 'Protein'])
+              )
+              AND e2.confidence >= 0.90
+              AND CASE
+                WHEN e2.type IN ['Gene', 'Protein']
+                  THEN NOT e2.name CONTAINS ' ' AND size(e2.name) <= 20
+                ELSE size(e2.name) <= 40
+                  AND NOT toLower(e2.name) ENDS WITH 'diseases'
+                  AND NOT toLower(e2.name) ENDS WITH 'disorders'
+              END
             RETURN e2.name AS entity, e2.type AS type,
                    r.similarity AS similarity
             ORDER BY r.similarity DESC
